@@ -1,0 +1,127 @@
+---
+title: "NYC Shooting Data"
+date: "3/2/2023"
+---
+
+This assignment will examine shooting incidents in NYC from the data source "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+
+### Setup
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Here, we load any required packages. In this report, we are using the tidyverse and lubridate packages.
+
+```{r loadLibrary}
+library(tidyverse)
+library(lubridate)
+```
+
+Once the packages are loaded, we retrieve the dataset we are using for our visualizations and model.
+```{r readdata}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nyc_shootings <- read_csv(url_in)
+```
+
+### Visualizations
+Looking at the data, I'm curious to see if there are any seasonal trends. To do this, I will plot the monthly averages, and attempt to gain insights based on my visualization. However, before we do this, we must first convert the values in OCCUR_DATE to the date datatype.
+
+```{r setDataType}
+nyc_shootings <- nyc_shootings %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+```
+
+Once the OCCUR_DATE column in our data is a date, we can proceed to create our visualizations. Here we are extracting the month from the OCCUR_DATE.
+
+
+```{r cleanMonthlyData}
+#Monthly Data
+monthly_data <- nyc_shootings%>% 
+  group_by(month = format(OCCUR_DATE, "%m"))%>%
+  summarize(shootings = n(),.groups = 'drop', murders = sum(STATISTICAL_MURDER_FLAG == TRUE))
+summary(monthly_data)
+```
+
+```{r plotMonthlyData}
+monthly_data %>%
+  ggplot() +
+  geom_point(data = monthly_data, aes(x = month, y = shootings, color = "Shootings" ))+
+  geom_point(data = monthly_data, aes(x = month, y = murders, color = "Murders" ))+
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  labs(title = "Monthly Shootings and Murders in NYC 2006-2021", y="Incidents", x="Month")
+```
+
+It seems that there are a greater number of shootings in the summer months, when the weather is warmer, and fewer in the winter months, when people tend to stay inside. 
+
+I am also curious to see what time of day these shootings and murders are occurring. I will plot hourly averages for this.
+
+```{r cleanHourlyData}
+#Hourly Data
+hourly_data <- nyc_shootings %>% 
+  group_by(timeOfDay = format(strptime(OCCUR_TIME,"%H:%M:%S"),'%H'))%>%
+  summarize(shootings = n(),.groups = 'drop', murders = sum(STATISTICAL_MURDER_FLAG == TRUE))
+summary(hourly_data)
+```
+```{r plotHourlyData}
+hourly_data %>%
+  ggplot() +
+  geom_point(data = hourly_data, aes(x = timeOfDay, y = shootings, color = "Shootings" ))+
+  geom_point(data = hourly_data, aes(x = timeOfDay, y = murders, color = "Murders" ))+
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  labs(title = "Shootings and Murders by Time of Day in NYC 2006-2021", y="Incidents", x="Time of Day (Hour)")
+```
+
+Based on the visualization, it seems that there are more shootings and murders in the night hours. 
+
+
+### Model
+I will also look attempt to model the total number of shootings between 2006 and 2021, using a linear model. The data will first be grouped by date, and cumulative number of shootings will be plotted.
+
+```{r cleanDailyData}
+#Daily Data Cleanup
+daily_data <- nyc_shootings %>% 
+  group_by(OCCUR_DATE)  %>%
+  tally()
+summary(daily_data)
+
+```
+
+```{r plotDailyData}
+daily_data %>%
+  ggplot(aes(x = OCCUR_DATE, y = cumsum(n), color = "Shootings"))+
+  geom_line()+
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  labs(title = "Total Shootings Over Time NYC 2006-2021", y="Shootings", x="Date")
+```
+
+The data looks fairly linear, so we will attempt to model this with a linear model.
+
+```{r createModel}
+model <- lm(cumsum(n) ~ OCCUR_DATE, data = daily_data)
+summary(model)
+```
+
+The linear model is a strong fit for the cumulative shootings for 2006 to 2021, with an r-squared value of 0.9875. This model estimates that there are 4.173 reported shootings per day in NYC.
+
+```{r plotModel}
+ggplot(data = daily_data, aes(x = OCCUR_DATE, y = cumsum(n))) +
+  geom_smooth(method='lm', formula= y~x, aes(color = "Prediction"), size = 1) +
+  geom_line(aes(color = "Shootings"), size = 1) + 
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  labs(title = "Total Shootings Over Time NYC 2006-2021", y="Shootings", x="Date")
+```
+
+The visualization seems to confirm the close fit of our linear model.
+
+### Bias
+Lastly we have to identify any potential sources for biases. One source, is my familiarity with the boroughs of NYC. Before even looking at the data, my assumption would be that Manhattan has the fewest per capita shootings. Another source of bias would be my assumptions around human behavior based on seasons, and time of day. Prior to creating the visualizations, my assumptions were that warmer weather meant higher number of reported gun incidents, and that most of these incidents were during the night hours. Though the data and visualizations seem to confirm my biases, but those biases were the reason why I looked into seasonal and time of day behavior in the first place.
+
+
