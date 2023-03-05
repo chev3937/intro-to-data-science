@@ -1,0 +1,241 @@
+---
+title: "Johns Hopkins COVID Visualizations and Analysis"
+date: "3/6/2023"
+---
+
+This assignment will examine COVID cases around the world, using data from Johns Hopkins. "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+
+# 1. Setup
+### 1.1. Load Packages
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Here, we load any required packages. In this report, we are using the tidyverse and lubridate packages.
+
+```{r loadLibrary}
+library(tidyverse)
+library(lubridate)
+```
+
+### 1.2. Load Data
+Once the packages are loaded, we retrieve the dataset we are using for our visualizations and model.
+
+```{r readData}
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+files <- c("time_series_covid19_confirmed_US.csv",  
+           "time_series_covid19_confirmed_global.csv", 
+           "time_series_covid19_deaths_US.csv",  
+           "time_series_covid19_deaths_global.csv")
+
+urls <- str_c(url_in, files)
+
+us_cases <- read_csv(urls[1])
+global_cases <- read_csv(urls[2])
+us_deaths <- read_csv(urls[3])
+global_deaths <- read_csv(urls[4])
+```
+
+### 1.3. Clean Data - Global
+At the moment, our data has a column for each date in the data set. We will first pivot the global cases and deaths to give each date and "Country/Region" it's own row. We will then join global_cases, and global_deaths, to create a single global table with cases and deaths in the same dataframe.
+
+```{r pivotGlobalData}
+global_cases <- global_cases %>%
+  pivot_longer(cols = -c("Province/State",
+                         "Country/Region", Lat, Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat,Long))
+global_cases
+
+global_deaths <- global_deaths %>%
+  pivot_longer(cols = -c("Province/State",
+                         "Country/Region", Lat, Long),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(Lat,Long))
+global_deaths
+
+```
+```{r joinGlobalData}
+global <- global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Country_Region = "Country/Region",
+         Province_Sate = "Province/State") %>%
+  mutate(date = mdy(date))
+
+global
+```
+
+Now we have a single global table with both cases and deaths. 
+
+### 1.4. Clean Data - U.S.
+
+Here we will utilize a similar process as to what we did for the global cases, to create a single table with cases and deaths in the U.S. For the combined data, I am looking to have states, cases, and deaths, as columns, and the dates as my rows.
+
+```{r pivotUSData}
+us_cases <- us_cases %>%
+  pivot_longer(cols = -c(Province_State,
+                         Country_Region, 
+                         iso2, iso3, 
+                         Admin2, Combined_Key,
+                         Lat, Long_,
+                         UID, code3, 
+                         FIPS),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(iso2, iso3, 
+            Admin2, Combined_Key,
+            Lat, Long_,
+            UID, code3, FIPS))
+
+us_cases <- us_cases  %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(total_cases = sum(cases))
+
+us_cases
+
+us_deaths <- us_deaths %>%
+  pivot_longer(cols = -c(Province_State,
+                         Country_Region, 
+                         iso2, iso3, 
+                         Admin2, Combined_Key,
+                         Lat, Long_,
+                         UID, code3, 
+                         FIPS, Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(iso2, iso3, 
+            Admin2, Combined_Key,
+            Lat, Long_,
+            UID, code3, FIPS))%>%
+  ungroup()
+
+us_deaths <- us_deaths %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(total_deaths = sum(deaths),
+           total_population = sum(Population))%>%
+  ungroup()
+
+us_deaths
+```
+
+From here we will join the U.S. cases data and deaths data to create one table.
+
+```{r joinUSData}
+us <- us_cases %>%
+  full_join(us_deaths) %>%
+  mutate(date = mdy(date))%>%
+  ungroup()
+us
+
+ca <- filter(us, Province_State == "California")%>%
+  mutate(cases_per_capita = total_cases/total_population, 
+         deaths_per_capita = total_deaths/total_population)
+ca
+wy <- filter(us, Province_State == "Wyoming")%>%
+  mutate(cases_per_capita = total_cases/total_population, 
+         deaths_per_capita = total_deaths/total_population)
+wy
+
+total_us <- us%>%
+  select(-c(Province_State))%>%
+  group_by(Country_Region, date)%>%
+  summarize(total_cases = sum(total_cases), 
+            total_deaths = sum(total_deaths), 
+            total_population = sum(total_population))%>%
+  ungroup()
+total_us
+```
+
+# 2. Visualizations
+
+For my first visualization, I will look at cases in California, the most populous state, and Wyoming, the least populous state. To see if the case and death numbers look any different. For both of these, I will look at per capita data.
+
+```{r californiaVsUSData}
+ca <- filter(us, Province_State == "California")%>%
+  mutate(cases_per_capita = total_cases/total_population*1000,
+         deaths_per_capita = total_deaths/total_population*1000)
+ca
+wy <- filter(us, Province_State == "Wyoming")%>%
+  mutate(cases_per_capita = total_cases/total_population*1000,
+         deaths_per_capita = total_deaths/total_population*1000)
+wy
+
+ggplot() +
+  geom_line(data = ca, aes(x = date, y = cases_per_capita, color = "CA - Cases" ))+
+  geom_line(data = ca, aes(x = date, y = deaths_per_capita, color = "CA - Deaths" ))+
+  geom_line(data = wy, aes(x = date, y = cases_per_capita, color = "WY - Cases" ))+
+  geom_line(data = wy, aes(x = date, y = deaths_per_capita, color = "WY - Deaths" ))+
+  
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  labs(title = "CA and WY COVID Cases and Deaths", y="Cases per 1000", x="Date")+
+  scale_y_continuous(trans='log10')
+```
+
+
+
+Based on the visualizations, it seems the Covid case and death numbers normalized for population are similar for California and Wyoming. The California observes cases and deaths earlier than Wyoming, which is expected. Next, we will look at Covid cases and deaths in Japan. 
+
+```{r plotJapanCases}
+japan <- (filter(global, Country_Region == "Japan"))
+japan
+
+japan %>%
+  ggplot() +
+  geom_line(data = japan, aes(x = date, y = cases, color = "Cases" ))+
+  geom_line(data = japan, aes(x = date, y = deaths, color = "Deaths" ))+
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  labs(title = "COVID Cases and Deaths in Japan", y="Cases", x="Date")+
+  scale_y_continuous(trans='log10')
+```
+
+Based on the visualization of cases and deaths in Japan, it seems that the ratio between cases and deaths remains fairly constant in the early parts, and a lower number of deaths per cases over time. 
+
+
+# 3. Model
+
+
+
+```{r model}
+japan %>%
+  ggplot() +
+  geom_line(data = japan, aes(x = date, y = cases, color = "Cases" ))+
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90))+
+  labs(title = "COVID Cases and Deaths in Japan", y="Cases", x="Date")
+```
+
+
+Since the graph for Covid cases in Japan appears to have an exponential relationship. I will see how an exponential model fits. To do this, I will apply a linear model to the log of cases.
+
+```{r createModel}
+model <- lm(log(cases) ~ date, data = japan)
+summary(model)
+```
+
+```{r predictValues}
+japan_pred <- japan %>% mutate(pred = exp(predict(model)))
+japan_pred
+```
+```{r modelPlot}
+japan_pred %>%
+  ggplot() +
+  geom_line(data = japan_pred, aes(x = date, y = cases, color = "Cases" ))+
+  geom_line(data = japan_pred, aes(x = date, y = pred, color = "Prediction"))+
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90))+
+  labs(title = "COVID Cases in Japan", y="Cases", x="Date")
+```
+
+Although the model implied a fairly strong exponential relationship, based on this last visualization, it seems the model would becomes weaker over time. The model seems to accurately track total cases until the middle of 2022 where the model and actual values diverge. This could be explained by a number of different factors, including vaccination rates, cultural acceptance of masking, etc. 
+
+# 4. Bias
+
+As with any sort of data analysis and visualization, we need to identify any biases in our work. One source, is my familiarity with all of these regions examined in the report. I had a pretty good idea what the shape of these graphs looked like prior to graphing them. I was intilly a little surprised that the per capita cases and deaths data for California and Wyoming were so close, but after thinking about the data some more, I realized that it made sense. For the Japanese data, I knew that the graph would look a little different than the data from the U.S. given a number of factors, one of them being their cultural acceptance of masking. Other biases may include biases in the reporting. There may have been many incindents of Covid that were not tested, and therefore not counted as a case. 
